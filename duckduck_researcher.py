@@ -3,10 +3,15 @@ from langchain.tools import DuckDuckGoSearchRun
 from langchain.schema import SystemMessage, HumanMessage
 from langchain.chains import LLMChain, SequentialChain
 from langchain.prompts import PromptTemplate
+from dotenv import load_dotenv
 import os
 
-# Set Groq API key
-os.environ["GROQ_API_KEY"] = ""  # Replace with your Groq API key
+load_dotenv()
+
+# Retrieve API key
+groq_api_key = os.getenv("GROQ_API_KEY")
+if not groq_api_key:
+    raise ValueError("❌ GROQ_API_KEY is missing! Make sure it's in the .env file.")
 
 # Initialize LLM
 groq_llm = ChatGroq(temperature=0.7, model_name="mixtral-8x7b-32768")
