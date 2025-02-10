@@ -1,5 +1,7 @@
 import os
 import re
+from urllib.parse import urlparse
+import tldextract
 from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -13,64 +15,114 @@ if not groq_api_key:
 
 groq_llm = ChatGroq(temperature=0.2, model_name="mixtral-8x7b-32768")
 
-class MaiilAgent:
-    def __init__(self, llm=groq_llm):
+class MailAgent:
+    def __init__(self, llm=groq_llm, confidence_threshold=0.7):
         self.llm = llm
+        self.confidence_threshold = confidence_threshold
         self.prompt = PromptTemplate(
-            input_variables=["email", "company", "official_url"],
+            input_variables=["email", "company", "official_url", "domain_match"],
             template=(
                 "You are an expert in email verification and lead generation. "
                 "Your task is to determine if the email {email} from {company} (official website: {official_url}) "
                 "is suitable for receiving newsletters. Follow the structured evaluation below.\n\n"
                 
-                "### **Step 1: Domain Match**\n"
-                "Does the email domain match the company's official website domain?\n"
-                "- Answer 'yes' or 'no'.\n"
+                "### **Domain Match** (Pre-verified)\n"
+                "The email domain {'✅ MATCHES' if domain_match else '❌ DOES NOT MATCH'} the company's official website domain.\n\n"
                 
-                "### **Step 2: Purpose of Email**\n"
-                "Analyze whether the email is used for general inquiries, customer support, or business communications.\n"
-                "- Answer 'yes' if it's for general or business use.\n"
-                "- Answer 'no' if it's personal or unrelated.\n"
+                "### **Purpose Analysis**\n"
+                "Analyze whether the email is used for:\n"
+                "- General inquiries\n"
+                "- Customer support\n"
+                "- Business communications\n"
+                "Answer 'YES' if suitable, 'NO' if personal/unrelated.\n\n"
                 
-                "### **Step 3: Official Website Verification**\n"
-                "Check if this email is listed on {official_url} as a contact point.\n"
-                "- Answer 'yes' or 'no'.\n"
+                "### **Historical Verification**\n"
+                "Based on common patterns, does this email type typically appear on company websites?\n"
+                "(Note: No live web access - using typical patterns)\n"
+                "Answer 'YES' or 'NO'.\n\n"
                 
-                "### **Step 4: Newsletter Suitability**\n"
-                "Should we send newsletters here? Consider if it is a **generic, business, or corporate email**.\n"
-                "- Answer 'yes' if the email is suitable and explain why.\n"
-                "- Answer 'no' if it is unsuitable and provide reasoning.\n"
+                "### **Newsletter Suitability**\n"
+                "Final recommendation considering:\n"
+                "- Domain verification status\n"
+                "- Email purpose\n"
+                "- Typical business practices\n"
+                "Answer 'YES' with reason if suitable, 'NO' with reasoning if not.\n\n"
                 
-                "### **Step 5: Confidence Score**\n"
-                "Give a confidence score (0.0 - 1.0) based on the evaluation.\n\n"
+                "### **Confidence Score**\n"
+                "Numerical confidence (0.0-1.0) based on available information.\n\n"
                 
-                "**Example Response:**\n"
-                "- **Domain Match:** Yes\n"
-                "- **Purpose of Email:** Yes, it's a business contact.\n"
-                "- **Official Website Verification:** Yes, listed on the site.\n"
-                "- **Newsletter Suitability:** Yes, it's a company-wide contact email.\n"
-                "- **Confidence Score:** 0.92"
+                "**Strict Response Format:**\n"
+                "Purpose Analysis: YES|NO\n"
+                "Historical Verification: YES|NO\n"
+                "Newsletter Suitability: YES|NO - [Brief Reason]\n"
+                "Confidence Score: [0.0-1.0]"
             )
         )
         self.relevance_chain = LLMChain(llm=self.llm, prompt=self.prompt)
 
-    def extract_confidence(self, response):
-        """Extract confidence score from LLM response."""
-        match = re.search(r"Confidence score: ([0-9.]+)", response)
-        return float(match.group(1)) if match else 0.0
+    def _extract_domain(self, email, url):
+        """Extract and compare domains using tldextract."""
+        email_domain = email.split('@')[-1].lower()
+        extracted = tldextract.extract(url)
+        official_domain = f"{extracted.domain}.{extracted.suffix}".lower()
+        return email_domain == official_domain or email_domain.endswith(f".{official_domain}")
+
+    def _parse_response(self, text):
+        """Robust response parsing with regex."""
+        patterns = {
+            "purpose": r"Purpose Analysis:\s*(YES|NO)",
+            "historical": r"Historical Verification:\s*(YES|NO)",
+            "suitability": r"Newsletter Suitability:\s*(YES|NO)",
+            "confidence": r"Confidence Score:\s*([0-9.]+)"
+        }
+        results = {}
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                results[key] = match.group(1).strip().upper()
+            else:
+                results[key] = "NO" if key != "confidence" else 0.0
+        
+        try:
+            results["confidence"] = float(results.get("confidence", 0.0))
+        except ValueError:
+            results["confidence"] = 0.0
+            
+        return results
 
     def evaluate_relevance(self, email, company, official_url):
-        """Use AI to determine if an email is relevant, with structured analysis."""
+        """Enhanced evaluation with domain check and structured parsing."""
         print(f"🔍 Evaluating: {email}")
+        
+        try:
+            # Programmatic domain verification
+            domain_match = self._extract_domain(email, official_url)
+            
+            # Get LLM analysis
+            response = self.relevance_chain.run({
+                "email": email,
+                "company": company,
+                "official_url": official_url,
+                "domain_match": domain_match
+            })
 
-        response = self.relevance_chain.run({
-            "email": email,
-            "company": company,
-            "official_url": official_url
-        })
-
-        confidence = self.extract_confidence(response)
-        relevant = "yes" in response.lower() and confidence >= 0.7  # Require 70% confidence
-
-        print(f"🤖 AI Response:\n{response}\n➡ Confidence: {confidence:.2f}")
-        return relevant
+            # Parse response
+            parsed = self._parse_response(response)
+            print(f"📊 Parsed Results: {parsed}")
+            
+            # Decision logic
+            conditions = [
+                domain_match,
+                parsed.get("purpose") == "YES",
+                parsed.get("historical") == "YES",
+                parsed.get("suitability") == "YES",
+                parsed.get("confidence", 0) >= self.confidence_threshold
+            ]
+            
+            relevant = all(conditions)
+            print(f"✅ Final Decision: {'APPROVED' if relevant else 'REJECTED'}")
+            return relevant
+            
+        except Exception as e:
+            print(f"⚠️ Evaluation Error: {str(e)}")
+            return False
