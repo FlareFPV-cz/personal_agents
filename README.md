@@ -19,7 +19,7 @@ A framework for building and managing personal AI agents using LangChain. This p
 ### Setup
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/personal_agents.git
+git clone https://github.com/FlareFPV-cz/personal_agents.git
 cd personal_agents
 ```
 
