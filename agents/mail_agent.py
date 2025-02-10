@@ -2,26 +2,20 @@ import os
 import re
 from urllib.parse import urlparse
 import tldextract
-from langchain_groq import ChatGroq
+import time
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from dotenv import load_dotenv
+from base_agent import BaseAgent
+from utils.logger import AgentLogger
 
-load_dotenv()
-
-groq_api_key = os.getenv("GROQ_API_KEY")
-if not groq_api_key:
-    raise ValueError("❌ GROQ_API_KEY is missing! Make sure it's in the .env file.")
-
-groq_llm = ChatGroq(temperature=0.2, model_name="mixtral-8x7b-32768")
-
-class MailAgent:
-    def __init__(self, llm=groq_llm, confidence_threshold=0.7):
-        self.llm = llm
+class MailAgent(BaseAgent):
+    def __init__(self, confidence_threshold=0.7, **kwargs):
+        super().__init__(**kwargs)
         self.confidence_threshold = confidence_threshold
-        self.prompt = PromptTemplate(
+        self.logger = AgentLogger("MailAgent", log_file="logs/mail_agent.log")
+        self._initialize_chain(
             input_variables=["email", "company", "official_url", "domain_match"],
-            template=(
+            prompt_template=(
                 "You are an expert in email verification and lead generation. "
                 "Your task is to determine if the email {email} from {company} (official website: {official_url}) "
                 "is suitable for receiving newsletters. Follow the structured evaluation below.\n\n"
@@ -58,7 +52,6 @@ class MailAgent:
                 "Confidence Score: [0.0-1.0]"
             )
         )
-        self.relevance_chain = LLMChain(llm=self.llm, prompt=self.prompt)
 
     def _extract_domain(self, email, url):
         """Extract and compare domains using tldextract."""
@@ -90,39 +83,41 @@ class MailAgent:
             
         return results
 
-    def evaluate_relevance(self, email, company, official_url):
+    def run(self, email, company, official_url):
         """Enhanced evaluation with domain check and structured parsing."""
-        print(f"🔍 Evaluating: {email}")
+        self.logger.info(f"Starting evaluation for email: {email}")
+        start_time = time.time()
         
         try:
             # Programmatic domain verification
             domain_match = self._extract_domain(email, official_url)
+            self.logger.debug(f"Domain match result: {domain_match}")
             
             # Get LLM analysis
-            response = self.relevance_chain.run({
+            response = self.chain.run({
                 "email": email,
                 "company": company,
                 "official_url": official_url,
                 "domain_match": domain_match
             })
+            self.logger.debug("LLM analysis completed")
 
             # Parse response
             parsed = self._parse_response(response)
-            print(f"📊 Parsed Results: {parsed}")
+            duration = time.time() - start_time
+            self.logger.info(f"Evaluation completed in {duration:.2f} seconds")
             
-            # Decision logic
-            conditions = [
-                domain_match,
-                parsed.get("purpose") == "YES",
-                parsed.get("historical") == "YES",
-                parsed.get("suitability") == "YES",
-                parsed.get("confidence", 0) >= self.confidence_threshold
-            ]
+            # Format result
+            result = {
+                'email': email,
+                'company': company,
+                'domain_match': domain_match,
+                'analysis': parsed,
+                'approved': parsed['confidence'] >= self.confidence_threshold
+            }
             
-            relevant = all(conditions)
-            print(f"✅ Final Decision: {'APPROVED' if relevant else 'REJECTED'}")
-            return relevant
+            return self._format_response(result)
             
         except Exception as e:
-            print(f"⚠️ Evaluation Error: {str(e)}")
-            return False
+            self.logger.error(f"Error during email evaluation: {str(e)}")
+            return self._handle_error(e, "email evaluation")

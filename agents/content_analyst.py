@@ -1,34 +1,21 @@
-# content_analyst.py
 import os
 import re
+import time
 import requests
 from bs4 import BeautifulSoup
-from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from dotenv import load_dotenv
+from base_agent import BaseAgent
+from utils.logger import AgentLogger
 
-# Load environment variables
-load_dotenv()
-
-# Configure Groq API
-groq_api_key = os.getenv("GROQ_API_KEY")
-if not groq_api_key:
-    raise ValueError("❌ GROQ_API_KEY missing from .env file")
-
-groq_llm = ChatGroq(
-    temperature=0.3,
-    model_name="mixtral-8x7b-32768",
-    groq_api_key=groq_api_key
-)
-
-class WebContentAnalyst:
-    def __init__(self, llm=groq_llm, quality_threshold=0.7):
-        self.llm = llm
+class WebContentAnalyst(BaseAgent):
+    def __init__(self, quality_threshold=0.7, **kwargs):
+        super().__init__(**kwargs)
         self.quality_threshold = quality_threshold
-        self.prompt = PromptTemplate(
+        self.logger = AgentLogger("WebContentAnalyst", log_file="logs/content_analyst.log")
+        self._initialize_chain(
             input_variables=["content", "source", "content_type"],
-            template="""
+            prompt_template="""
             Analyze this web content from {source} ({content_type}):
             ---
             {content}
@@ -62,10 +49,12 @@ class WebContentAnalyst:
             ---
             """
         )
-        self.chain = LLMChain(llm=self.llm, prompt=self.prompt)
     
     def _fetch_url_content(self, url):
         """Fetch and clean web content with error handling"""
+        self.logger.info(f"Fetching content from URL: {url}")
+        start_time = time.time()
+        
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -83,11 +72,41 @@ class WebContentAnalyst:
             
             # Extract main content
             main_content = soup.find('article') or soup.find('main') or soup.body
-            return ' '.join(main_content.get_text(separator=' ', strip=True).split()[:2000])
+            content = ' '.join(main_content.get_text(separator=' ', strip=True).split()[:2000])
+            
+            duration = time.time() - start_time
+            self.logger.info(f"Content fetched successfully in {duration:.2f} seconds")
+            return content
             
         except Exception as e:
-            print(f"🚨 Error fetching {url}: {str(e)}")
-            return None
+            self.logger.error(f"Error fetching URL content: {str(e)}")
+            return self._handle_error(e, "fetching URL content")['data']
+
+    def run(self, url):
+        """Main execution flow for content analysis"""
+        self.logger.info(f"Starting content analysis for URL: {url}")
+        start_time = time.time()
+        
+        try:
+            content = self._fetch_url_content(url)
+            self.logger.debug("Content fetched, starting analysis")
+            
+            response = self.chain.run({
+                "content": content,
+                "source": url,
+                "content_type": "webpage"
+            })
+            self.logger.debug("LLM analysis completed")
+            
+            analysis = self._parse_analysis(response)
+            duration = time.time() - start_time
+            self.logger.info(f"Analysis completed in {duration:.2f} seconds")
+            
+            return self._format_response(analysis)
+            
+        except Exception as e:
+            self.logger.error(f"Error during content analysis: {str(e)}")
+            return self._handle_error(e, "content analysis")
 
     def _parse_analysis(self, text):
         """Parse LLM response with robust error handling"""
@@ -124,10 +143,9 @@ class WebContentAnalyst:
             return result
             
         except Exception as e:
-            print(f"⚠️ Error parsing analysis: {str(e)}")
-            return result
+            return self._handle_error(e, "parsing analysis")['data'] or result
 
-    def analyze(self, input_source):
+    def run(self, input_source):
         """Main analysis method handling both URLs and text"""
         analysis_result = {
             'source': input_source if input_source.startswith('http') else 'Text Input',
@@ -145,7 +163,7 @@ class WebContentAnalyst:
                 print(f"🌐 Fetching content from: {input_source}")
                 content = self._fetch_url_content(input_source)
                 if not content:
-                    return analysis_result
+                    return self._format_response(analysis_result)
                 content_type = 'webpage'
                 
             # Text handling
@@ -165,11 +183,10 @@ class WebContentAnalyst:
             analysis_result.update(parsed)
             analysis_result['content'] = content[:500] + '...'  # Store preview
             
-            return analysis_result
+            return self._format_response(analysis_result)
             
         except Exception as e:
-            print(f"⚠️ Analysis failed: {str(e)}")
-            return analysis_result
+            return self._handle_error(e, "analysis")
 
 # if __name__ == "__main__":
 #     # Example usage
@@ -187,7 +204,6 @@ class WebContentAnalyst:
 #     Recommendations:
 #     {chr(10).join(f' - {rec}' for rec in url_result['recommendations'])}
 #     """)
-    
 #     # Analyze text
 #     print("\n📝 Analyzing Text:")
 #     text_content = """
