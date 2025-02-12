@@ -3,9 +3,8 @@ import re
 from urllib.parse import urlparse
 import tldextract
 import time
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
-from base_agent import BaseAgent
+from langchain.prompts import ChatPromptTemplate
+from core.base_agent import BaseAgent
 from utils.logger import AgentLogger
 
 class MailAgent(BaseAgent):
@@ -14,43 +13,41 @@ class MailAgent(BaseAgent):
         self.confidence_threshold = confidence_threshold
         self.logger = AgentLogger("MailAgent", log_file="logs/mail_agent.log")
         self._initialize_chain(
-            input_variables=["email", "company", "official_url", "domain_match"],
-            prompt_template=(
-                "You are an expert in email verification and lead generation. "
-                "Your task is to determine if the email {email} from {company} (official website: {official_url}) "
-                "is suitable for receiving newsletters. Follow the structured evaluation below.\n\n"
-                
-                "### **Domain Match** (Pre-verified)\n"
-                "The email domain {'✅ MATCHES' if domain_match else '❌ DOES NOT MATCH'} the company's official website domain.\n\n"
-                
-                "### **Purpose Analysis**\n"
-                "Analyze whether the email is used for:\n"
-                "- General inquiries\n"
-                "- Customer support\n"
-                "- Business communications\n"
-                "Answer 'YES' if suitable, 'NO' if personal/unrelated.\n\n"
-                
-                "### **Historical Verification**\n"
-                "Based on common patterns, does this email type typically appear on company websites?\n"
-                "(Note: No live web access - using typical patterns)\n"
-                "Answer 'YES' or 'NO'.\n\n"
-                
-                "### **Newsletter Suitability**\n"
-                "Final recommendation considering:\n"
-                "- Domain verification status\n"
-                "- Email purpose\n"
-                "- Typical business practices\n"
-                "Answer 'YES' with reason if suitable, 'NO' with reasoning if not.\n\n"
-                
-                "### **Confidence Score**\n"
-                "Numerical confidence (0.0-1.0) based on available information.\n\n"
-                
-                "**Strict Response Format:**\n"
-                "Purpose Analysis: YES|NO\n"
-                "Historical Verification: YES|NO\n"
-                "Newsletter Suitability: YES|NO - [Brief Reason]\n"
-                "Confidence Score: [0.0-1.0]"
-            )
+            prompt_template="""system
+You are an expert in email verification and lead generation. 
+Your task is to determine if the email {email} from {company} (official website: {official_url}) 
+is suitable for receiving newsletters. Follow the structured evaluation below.
+
+### **Domain Match** (Pre-verified)
+The email domain {domain_description} the company's official website domain.
+
+### **Purpose Analysis**
+Analyze whether the email is used for:
+- General inquiries
+- Customer support
+- Business communications
+Answer 'YES' if suitable, 'NO' if personal/unrelated.
+
+### **Historical Verification**
+Based on common patterns, does this email type typically appear on company websites?
+(Note: No live web access - using typical patterns)
+Answer 'YES' or 'NO'.
+
+### **Newsletter Suitability**
+Final recommendation considering:
+- Domain verification status
+- Email purpose
+- Typical business practices
+Answer 'YES' with reason if suitable, 'NO' with reasoning if not.
+
+### **Confidence Score**
+Numerical confidence (0.0-1.0) based on available information.
+
+**Strict Response Format:**
+Purpose Analysis: YES|NO
+Historical Verification: YES|NO
+Newsletter Suitability: YES|NO - [Brief Reason]
+Confidence Score: [0.0-1.0]"""
         )
 
     def _extract_domain(self, email, url):
@@ -92,18 +89,26 @@ class MailAgent(BaseAgent):
             # Programmatic domain verification
             domain_match = self._extract_domain(email, official_url)
             self.logger.debug(f"Domain match result: {domain_match}")
+            # Compute domain_description based on verification result
+            domain_description = "✅ MATCHES" if domain_match else "❌ DOES NOT MATCH"
             
-            # Get LLM analysis
-            response = self.chain.run({
+            # Get LLM analysis by passing domain_description rather than inline expression
+            response = self.chain.invoke({
                 "email": email,
                 "company": company,
                 "official_url": official_url,
-                "domain_match": domain_match
+                "domain_description": domain_description
             })
             self.logger.debug("LLM analysis completed")
+            
+            # Ensure response is a string for parsing.
+            if isinstance(response, dict):
+                response_text = response.content
+            else:
+                response_text = response.content if hasattr(response, 'content') else str(response)
 
-            # Parse response
-            parsed = self._parse_response(response)
+            parsed = self._parse_response(response_text)
+
             duration = time.time() - start_time
             self.logger.info(f"Evaluation completed in {duration:.2f} seconds")
             

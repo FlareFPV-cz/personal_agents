@@ -3,9 +3,8 @@ import re
 import time
 import requests
 from bs4 import BeautifulSoup
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
-from base_agent import BaseAgent
+from langchain.prompts import ChatPromptTemplate
+from core.base_agent import BaseAgent
 from utils.logger import AgentLogger
 
 class WebContentAnalyst(BaseAgent):
@@ -14,8 +13,7 @@ class WebContentAnalyst(BaseAgent):
         self.quality_threshold = quality_threshold
         self.logger = AgentLogger("WebContentAnalyst", log_file="logs/content_analyst.log")
         self._initialize_chain(
-            input_variables=["content", "source", "content_type"],
-            prompt_template="""
+            prompt_template="""system
             Analyze this web content from {source} ({content_type}):
             ---
             {content}
@@ -82,34 +80,12 @@ class WebContentAnalyst(BaseAgent):
             self.logger.error(f"Error fetching URL content: {str(e)}")
             return self._handle_error(e, "fetching URL content")['data']
 
-    def run(self, url):
-        """Main execution flow for content analysis"""
-        self.logger.info(f"Starting content analysis for URL: {url}")
-        start_time = time.time()
-        
-        try:
-            content = self._fetch_url_content(url)
-            self.logger.debug("Content fetched, starting analysis")
-            
-            response = self.chain.run({
-                "content": content,
-                "source": url,
-                "content_type": "webpage"
-            })
-            self.logger.debug("LLM analysis completed")
-            
-            analysis = self._parse_analysis(response)
-            duration = time.time() - start_time
-            self.logger.info(f"Analysis completed in {duration:.2f} seconds")
-            
-            return self._format_response(analysis)
-            
-        except Exception as e:
-            self.logger.error(f"Error during content analysis: {str(e)}")
-            return self._handle_error(e, "content analysis")
-
     def _parse_analysis(self, text):
         """Parse LLM response with robust error handling"""
+        # Ensure we work with a string.
+        if isinstance(text, dict):
+            text = text.get("text", str(text))
+            
         result = {
             'score': 0.0,
             'type': 'Unknown',
@@ -171,15 +147,16 @@ class WebContentAnalyst(BaseAgent):
                 content = ' '.join(input_source.split()[:2000])  # Limit to 2000 words
                 content_type = 'text'
             
-            # Run analysis
-            llm_response = self.chain.run({
+            llm_response = self.chain.invoke({
                 'content': content,
                 'source': input_source,
                 'content_type': content_type
             })
             
             # Parse and merge results
-            parsed = self._parse_analysis(llm_response)
+            parsed = self._parse_analysis(llm_response.content)
+            
+            # Parse and merge results
             analysis_result.update(parsed)
             analysis_result['content'] = content[:500] + '...'  # Store preview
             
@@ -187,38 +164,3 @@ class WebContentAnalyst(BaseAgent):
             
         except Exception as e:
             return self._handle_error(e, "analysis")
-
-# if __name__ == "__main__":
-#     # Example usage
-#     analyst = WebContentAnalyst(quality_threshold=0.65)
-    
-#     # Analyze URL
-#     print("\n🔗 Analyzing URL:")
-#     url_result = analyst.analyze("https://example.com/blog/sustainability")
-#     print(f"""
-#     URL Analysis Results:
-#     Score: {url_result['score']:.2f}
-#     Type: {url_result['type']}
-#     Sentiment: {url_result['sentiment']}
-#     Approved: {'✅ Yes' if url_result['approved'] else '❌ No'}
-#     Recommendations:
-#     {chr(10).join(f' - {rec}' for rec in url_result['recommendations'])}
-#     """)
-#     # Analyze text
-#     print("\n📝 Analyzing Text:")
-#     text_content = """
-#     Introducing our revolutionary new solar panel technology! 
-#     With 40% higher efficiency than conventional panels, our 
-#     patented design makes renewable energy accessible for all.
-#     #CleanEnergy #Innovation
-#     """
-#     text_result = analyst.analyze(text_content)
-#     print(f"""
-#     Text Analysis Results:
-#     Score: {text_result['score']:.2f}
-#     Type: {text_result['type']}
-#     Sentiment: {text_result['sentiment']}
-#     Approved: {'✅ Yes' if text_result['approved'] else '❌ No'}
-#     Recommendations:
-#     {chr(10).join(f' - {rec}' for rec in text_result['recommendations'])}
-#     """)

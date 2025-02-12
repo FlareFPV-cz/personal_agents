@@ -2,20 +2,24 @@
 import os
 from typing import Optional, Dict, Any
 from langchain_groq import ChatGroq
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
+from langchain.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable
 from utils.config_manager import ConfigManager
+from dotenv import load_dotenv
 
 class BaseAgent:
     def __init__(self, temperature: float = 0.3, model_name: str = "mixtral-8x7b-32768"):
         # Initialize configuration manager
         self.config = ConfigManager()
-        self.config.load_env_vars()
-        
-        # Configure Groq API
-        self.groq_api_key = self.config.get("groq_api_key")
+        load_dotenv("../.env")  # Adjust path as needed
+
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
+
         if not self.groq_api_key:
-            raise ValueError("❌ GROQ_API_KEY missing from configuration")
+            raise ValueError("❌ GROQ_API_KEY missing from .env file or environment")
+
+        # Configure Groq API
+        print(f"BaseAgent initialized from: {os.path.abspath(__file__)}")
         
         # Initialize LLM
         self.llm = ChatGroq(
@@ -25,16 +29,15 @@ class BaseAgent:
         )
         
         # Initialize chain and prompt as None
-        self.chain: Optional[LLMChain] = None
-        self.prompt: Optional[PromptTemplate] = None
+        self.chain: Optional[Runnable] = None
+        self.prompt: Optional[ChatPromptTemplate] = None
     
-    def _initialize_chain(self, prompt_template: str, input_variables: list):
-        """Initialize LangChain with prompt template"""
-        self.prompt = PromptTemplate(
-            input_variables=input_variables,
-            template=prompt_template
-        )
-        self.chain = LLMChain(llm=self.llm, prompt=self.prompt)
+    def _initialize_chain(self, prompt_template: str):
+        """Initialize LangChain with chat prompt template"""
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("human", prompt_template),
+        ])
+        self.chain = self.prompt | self.llm
     
     def _handle_error(self, error: Exception, context: str = "") -> Dict[str, Any]:
         """Standardized error handling"""

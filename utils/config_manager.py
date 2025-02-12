@@ -2,6 +2,7 @@ import os
 import json
 from typing import Any, Dict, Optional
 from pathlib import Path
+from dotenv import load_dotenv
 
 class ConfigManager:
     """Manages configuration settings for the framework."""
@@ -12,6 +13,12 @@ class ConfigManager:
         Args:
             config_path: Optional path to configuration file
         """
+        load_dotenv("../.env")  # Or the correct path
+
+        groq_api_key = os.environ.get("GROQ_API_KEY")
+
+        if not groq_api_key:
+            raise ValueError("❌ GROQ_API_KEY missing from .env file or environment")
         self.config: Dict[str, Any] = {}
         self.config_path = config_path or os.getenv('AGENT_CONFIG_PATH')
         self._load_config()

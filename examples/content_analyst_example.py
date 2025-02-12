@@ -1,4 +1,7 @@
-# Example usage of WebContentAnalyst
+# Example usage of MailAgent
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from agents.content_analyst import WebContentAnalyst
 
 def main():
@@ -7,7 +10,7 @@ def main():
     
     # Example 1: Analyze a URL
     print("\n🔗 Analyzing URL:")
-    url = "https://www.example.com/blog/sustainability"
+    url = "https://www.butonroses.store"
     url_result = analyst.run(url)
     
     if url_result['success']:
