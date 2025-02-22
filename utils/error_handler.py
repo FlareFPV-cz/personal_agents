@@ -1,5 +1,7 @@
 from typing import Dict, Any, Optional
 from enum import Enum
+from datetime import datetime
+import os
 
 class ErrorSeverity(Enum):
     """Enum for error severity levels"""
@@ -39,6 +41,11 @@ class AuthenticationError(AgentError):
     """Raised when there's an authentication failure."""
     def __init__(self, message: str, auth_type: str):
         super().__init__(message, severity=ErrorSeverity.CRITICAL, details={"auth_type": auth_type})
+
+class CollaborationError(AgentError):
+    """Raised when there's an error in agent collaboration."""
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, severity=ErrorSeverity.HIGH, details=details)
 
 def handle_agent_error(error: Exception) -> Dict[str, Any]:
     """Formats agent errors into a standardized response format.

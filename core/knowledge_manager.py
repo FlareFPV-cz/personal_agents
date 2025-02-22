@@ -1,52 +1,45 @@
 from typing import Dict, List, Optional, Any
-import chromadb
-from networkx import DiGraph
-from langchain.vectorstores import Chroma
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from collections import defaultdict
+from datetime import datetime
+from math import log
 
 class KnowledgeManager:
-    """Manages knowledge components including RAG, vector storage, and knowledge graph."""
+    """Manages knowledge components using in-memory storage."""
 
-    def __init__(self, embedding_model: str = "text-embedding-3-small"):
-        """Initialize knowledge management components.
+    def __init__(self):
+        """Initialize knowledge management components."""
+        self.knowledge_store = []
+        self.knowledge_graph = {}
+        self.knowledge_index = defaultdict(list)  # For text search
 
-        Args:
-            embedding_model: The OpenAI embedding model to use
-        """
-        self.embeddings = OpenAIEmbeddings(model=embedding_model)
-        self.vector_store = None
-        self.knowledge_graph = DiGraph()
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
-        )
-
-    def initialize_vector_store(self, persist_directory: str = "./vector_store"):
-        """Initialize the vector store with ChromaDB.
-
-        Args:
-            persist_directory: Directory to persist vector store
-        """
-        self.vector_store = Chroma(
-            persist_directory=persist_directory,
-            embedding_function=self.embeddings
-        )
-
-    def add_documents(self, documents: List[str], metadata: Optional[List[Dict]] = None):
-        """Add documents to the vector store.
+    def add_documents(self, documents: List[str], metadata: Optional[List[Dict]] = None) -> None:
+        """Add documents to the knowledge store.
 
         Args:
             documents: List of document texts
             metadata: Optional metadata for each document
         """
-        chunks = self.text_splitter.split_text(documents)
-        if self.vector_store is None:
-            self.initialize_vector_store()
-        self.vector_store.add_texts(texts=chunks, metadatas=metadata)
+        for i, doc in enumerate(documents):
+            # Create document entry
+            doc_id = f"doc_{len(self.knowledge_store)}"
+            doc_entry = {
+                'id': doc_id,
+                'content': doc,
+                'metadata': metadata[i] if metadata and i < len(metadata) else {},
+                'timestamp': datetime.now().isoformat(),
+                'type': 'document'
+            }
+            
+            # Add to knowledge store
+            self.knowledge_store.append(doc_entry)
+            
+            # Index document words for search
+            words = doc.lower().split()
+            for word in words:
+                self.knowledge_index[word].append(doc_id)
 
     def search_similar(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for similar documents in the vector store.
+        """Search for similar documents using semantic matching.
 
         Args:
             query: The search query
@@ -55,20 +48,52 @@ class KnowledgeManager:
         Returns:
             List of similar documents with their metadata
         """
-        if self.vector_store is None:
-            raise ValueError("Vector store not initialized")
-        return self.vector_store.similarity_search(query, k=k)
+        # Split query into words and find matching documents
+        query_words = query.lower().split()
+        matching_docs = defaultdict(float)
+        
+        # Calculate TF-IDF scores
+        doc_count = len(self.knowledge_store)
+        for word in query_words:
+            # Calculate IDF
+            doc_freq = len(self.knowledge_index.get(word, []))
+            if doc_freq > 0:
+                idf = 1 + log(doc_count / doc_freq)
+                
+                # Calculate TF for each document
+                for doc_id in self.knowledge_index.get(word, []):
+                    doc = next(d for d in self.knowledge_store if d['id'] == doc_id)
+                    tf = doc['content'].lower().count(word) / len(doc['content'].split())
+                    matching_docs[doc_id] += tf * idf
+        
+        # Sort by TF-IDF score
+        sorted_docs = sorted(matching_docs.items(), 
+                           key=lambda x: x[1], 
+                           reverse=True)
+        
+        # Get top k results
+        results = []
+        if query_words:  # Only return results if query is not empty
+            for doc_id, score in sorted_docs[:k]:
+                if score > 0:  # Only include documents with matching words
+                    doc = next(d for d in self.knowledge_store if d['id'] == doc_id)
+                    results.append(doc)
+        
+        return results
 
-    def add_knowledge_node(self, node_id: str, attributes: Dict[str, Any]):
+    def add_knowledge_node(self, node_id: str, attributes: Dict[str, Any]) -> None:
         """Add a node to the knowledge graph.
 
         Args:
             node_id: Unique identifier for the node
             attributes: Node attributes
         """
-        self.knowledge_graph.add_node(node_id, **attributes)
+        self.knowledge_graph[node_id] = {
+            'attributes': attributes,
+            'connections': {'incoming': [], 'outgoing': []}
+        }
 
-    def add_knowledge_relation(self, from_node: str, to_node: str, relation_type: str):
+    def add_knowledge_relation(self, from_node: str, to_node: str, relation_type: str) -> None:
         """Add a relation between nodes in the knowledge graph.
 
         Args:
@@ -76,7 +101,17 @@ class KnowledgeManager:
             to_node: Target node ID
             relation_type: Type of relation
         """
-        self.knowledge_graph.add_edge(from_node, to_node, relation=relation_type)
+        if from_node not in self.knowledge_graph or to_node not in self.knowledge_graph:
+            raise ValueError("Both nodes must exist in the knowledge graph")
+            
+        self.knowledge_graph[from_node]['connections']['outgoing'].append({
+            'to': to_node,
+            'type': relation_type
+        })
+        self.knowledge_graph[to_node]['connections']['incoming'].append({
+            'from': from_node,
+            'type': relation_type
+        })
 
     def get_related_nodes(self, node_id: str) -> Dict[str, List[str]]:
         """Get nodes related to a given node.
@@ -87,7 +122,11 @@ class KnowledgeManager:
         Returns:
             Dictionary of incoming and outgoing relations
         """
+        if node_id not in self.knowledge_graph:
+            raise ValueError(f"Node {node_id} not found in knowledge graph")
+            
+        node = self.knowledge_graph[node_id]
         return {
-            "incoming": list(self.knowledge_graph.predecessors(node_id)),
-            "outgoing": list(self.knowledge_graph.successors(node_id))
+            'incoming': [conn['from'] for conn in node['connections']['incoming']],
+            'outgoing': [conn['to'] for conn in node['connections']['outgoing']]
         }

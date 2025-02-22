@@ -22,6 +22,8 @@ A comprehensive framework for building and managing intelligent AI agents powere
 ### Prerequisites
 - Python 3.8 or higher
 - Groq API key for LLM access
+- Git (for cloning the repository)
+- pip (Python package installer)
 
 ### Quick Start
 1. Clone the repository:
@@ -41,6 +43,12 @@ Create a `.env` file in the project root:
 GROQ_API_KEY=your_api_key_here
 AGENT_CONFIG_PATH=path/to/config.json  # Optional
 ```
+
+### Configuration Options
+- `GROQ_API_KEY`: Your Groq API key for LLM access
+- `AGENT_CONFIG_PATH`: Path to custom agent configuration file (optional)
+- `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
+- `KNOWLEDGE_BASE_PATH`: Path to persistent knowledge storage
 
 ## Usage Examples
 
@@ -81,6 +89,21 @@ agent.add_task(task)
 recommendations = agent.run("What should I focus on today?")
 ```
 
+### Code Analysis
+```python
+from agents.code_analyst import CodeHelper
+
+# Initialize analyzer
+analyzer = CodeHelper(
+    quality_threshold=8.5,
+    model_name="llama3-70b-8192"
+)
+
+# Analyze code
+results = analyzer.analyze("path/to/your/code.py")
+print(f"Quality Score: {results['quality_score']}/10")
+```
+
 ## Architecture
 
 ### Core Components
@@ -109,6 +132,27 @@ personal_agents/
 └── requirements.txt   # Project dependencies
 ```
 
+## Troubleshooting
+
+### Common Issues
+1. **API Key Issues**
+   - Ensure GROQ_API_KEY is properly set in .env file
+   - Verify API key permissions and quota
+
+2. **Import Errors**
+   - Confirm all dependencies are installed: `pip install -r requirements.txt`
+   - Check Python version compatibility
+
+3. **Agent Initialization Failures**
+   - Verify configuration file paths
+   - Check log files for detailed error messages
+
+### Debug Mode
+Enable debug logging by setting:
+```env
+LOG_LEVEL=DEBUG
+```
+
 ## Contributing
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -116,10 +160,22 @@ personal_agents/
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+### Development Guidelines
+- Follow PEP 8 style guide
+- Add unit tests for new features
+- Update documentation as needed
+- Maintain backwards compatibility
+
 ## Testing
 Run the test suite:
 ```bash
 python -m unittest discover tests
+```
+
+For coverage report:
+```bash
+coverage run -m unittest discover
+coverage report
 ```
 
 ## Future Roadmap
